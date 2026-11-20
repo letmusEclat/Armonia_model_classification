@@ -5,7 +5,7 @@
 
 
 ## Integrantes
-- [Maidy Alexandra Ronderos Gomez]
+- [ Maidy Alexandra Ronderos Gomez ]
 - [Karen Sofia Sanchez Castañeda]
 - [Isabel Vargas Peña]
 
