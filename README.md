@@ -5,9 +5,9 @@
 
 
 ## Integrantes
-- [ Maidy Alexandra Ronderos Gomez ]
-- [Karen Sofia Sanchez Castañeda]
-- [Isabel Vargas Peña]
+-  Maidy Alexandra Ronderos Gomez
+- Karen Sofia Sanchez Castañeda
+- Isabel Vargas Peña
 
 Proyecto IA 1 – Grupo F1 – [Universidad Industrial de Santander], 2026-2
 
