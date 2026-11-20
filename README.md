@@ -1,7 +1,7 @@
 # Armonia_model_classification
 # ArmonIA – Recomendador de colores de ropa según colorimetría
 
-![Banner del proyecto](banner armonia.jpeg)
+![Banner del proyecto](banner%20armonia.jpeg)
 
 
 ## Integrantes
