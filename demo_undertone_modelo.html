@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ArmonIA – demo de undertone en tiempo real</title>
+<style>
+  :root{--bg:#faf9f5;--card:#ffffff;--text:#1f1e1d;--muted:#6b6963;--line:#e2dfd6;--accent:#2f6fdb;--ok:#2d7a3e;--bad:#b3322d}
+  @media (prefers-color-scheme:dark){:root{--bg:#1c1b19;--card:#262522;--text:#f1efe8;--muted:#a8a59b;--line:#3a3935;--accent:#6aa0ff;--ok:#6fcf83;--bad:#ff8a84}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+  main{max-width:1080px;margin:0 auto;padding:24px 16px 48px}
+  h1{font-size:22px;font-weight:600;margin:0 0 4px}
+  h2{font-size:15px;font-weight:600;margin:0 0 10px}
+  .sub{color:var(--muted);margin:0 0 20px}
+  .grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px}
+  @media (max-width:860px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  #stage{position:relative;width:100%;aspect-ratio:4/3;background:#111;border-radius:10px;overflow:hidden;transform:scaleX(-1);cursor:crosshair}
+  #stage video,#stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+  button,select{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
+  button:hover,select:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .muted{color:var(--muted);font-size:13px}
+  .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
+  .m{background:var(--bg);border-radius:8px;padding:8px 10px}
+  .m b{display:block;font-size:18px;font-weight:600}
+  .m span{font-size:12px;color:var(--muted)}
+  .chip{display:inline-block;width:34px;height:34px;border-radius:8px;border:1px solid var(--line);vertical-align:middle}
+  .big{font-size:30px;font-weight:600;margin:2px 0}
+  label.sl{display:flex;align-items:center;gap:10px;font-size:13px;margin:6px 0}
+  label.sl input{flex:1}
+  .pal-row{display:flex;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+  .pal-lab{width:92px;flex:none;font-weight:600;font-size:13px}
+  .pal-lab.ok{color:var(--ok)} .pal-lab.bad{color:var(--bad)}
+  .sw{display:flex;flex-wrap:wrap;gap:10px;flex:1}
+  .c{width:74px;text-align:center;font-size:12px;color:var(--muted);line-height:1.3}
+  .c i{display:block;height:34px;border-radius:8px;border:1px solid var(--line);margin-bottom:4px}
+  #status{font-size:13px;color:var(--muted);margin-top:8px;min-height:20px}
+  details summary{cursor:pointer;font-weight:600}
+</style>
+</head>
+<body>
+<main>
+  <h1>Demo en tiempo real: estimación de undertone y recomendación de colores</h1>
+  <p class="sub">La cámara estima el undertone a partir del color de la piel y ese dato entra al <b>modelo real de ArmonIA</b> (árbol de decisión entrenado con scikit-learn y exportado a este archivo), que predice la paleta de colores. Todo se procesa en tu navegador; no se sube video a ningún servidor.</p>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <div id="stage"><video id="video" playsinline muted></video><canvas id="overlay"></canvas></div>
+        <div class="row">
+          <button id="btnStart" class="primary">Iniciar cámara</button>
+          <button id="btnWbReset">Quitar calibración de blanco</button>
+        </div>
+        <div id="status">Pulsa "Iniciar cámara" y permite el acceso.</div>
+        <p class="muted">Calibración de blanco opcional: sostén una hoja blanca en cuadro y haz clic sobre ella en el video. Mejora mucho la estimación con luz amarilla o fría.</p>
+      </div>
+      <div class="card">
+        <details>
+          <summary>Calibrar el clasificador (para la sustentación)</summary>
+          <p class="muted">Los umbrales iniciales son solo de ejemplo. Calibra con personas cuyo undertone conozcas (por ejemplo con la prueba de joyería dorada vs. plateada). Con muestras de al menos dos clases, el clasificador pasa a usar los centroides de tus muestras en lugar de los umbrales.</p>
+          <label class="sl">Cool si el ángulo es menor que <input type="range" id="slCool" min="35" max="75" step="0.5" value="50"><b id="vCool">50</b>°</label>
+          <label class="sl">Warm si el ángulo es mayor que <input type="range" id="slWarm" min="35" max="75" step="0.5" value="58"><b id="vWarm">58</b>°</label>
+          <div class="row">
+            <select id="labelSel"><option>Warm</option><option>Cool</option><option>Neutral</option></select>
+            <button id="btnSave">Guardar muestra con esta etiqueta</button>
+            <button id="btnClear">Borrar muestras</button>
+          </div>
+          <div class="muted" id="sampleInfo">Muestras guardadas: 0</div>
+        </details>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Lo que mide la cámara (piel: frente y mejillas)</h2>
+        <div class="row" style="margin-top:0"><span class="chip" id="skinChip"></span><span class="muted" id="faceStatus">Sin datos todavía</span></div>
+        <div class="metrics">
+          <div class="m"><b id="mL">–</b><span>L* luminosidad</span></div>
+          <div class="m"><b id="mA">–</b><span>a* (verde a rojo)</span></div>
+          <div class="m"><b id="mB">–</b><span>b* (azul a amarillo)</span></div>
+          <div class="m"><b id="mH">–</b><span>ángulo de color °</span></div>
+        </div>
+        <div class="muted">Más amarillo (ángulo alto) tiende a Warm; más rosado (ángulo bajo) tiende a Cool.</div>
+      </div>
+      <div class="card">
+        <h2>Undertone estimado</h2>
+        <div class="big" id="result">–</div>
+        <div class="muted" id="resultSrc">Esperando cámara</div>
+        <div class="row">
+          <button id="btnLock">Fijar resultado</button>
+          <label class="muted">Corregir manualmente:
+            <select id="override"><option value="auto">Automático</option><option>Warm</option><option>Cool</option><option>Neutral</option></select>
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Entradas del modelo</h2>
+        <div class="muted" style="margin-bottom:8px">El subtono viene de la cámara (o de la corrección manual). Pelo, ojos y piel son las otras entradas con las que se entrenó el modelo.</div>
+        <div id="modelInputs"></div>
+      </div>
+      <div class="card">
+        <h2>Predicción del modelo (árbol de decisión)</h2>
+        <div id="palette" class="muted">Se mostrará cuando haya un undertone.</div>
+        <div class="muted" id="modelInfo" style="margin-top:10px"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/vision_bundle.mjs";
+
+const WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/wasm";
+const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+const PATCH_IDS = [151, 205, 425, 118, 347];
+
+const JEWEL = ["#0B6E4F", "#2A3F9E", "#8E1B4B"];
+const NEON = ["#39FF14", "#FF2FD0", "#FFF01F"];
+const ARMONIA = {"inputs": ["Hair Color", "Eye Color", "Skin Tone", "Under Tone"], "categories": {"Hair Color": ["Black", "Blonde", "Brown", "Grey", "Red"], "Eye Color": ["Black", "Blue", "Brown", "Green", "Grey", "Hazel", "Light Blue", "Light Brown"], "Skin Tone": ["Brown", "Fair", "Medium", "Olive", "Very Dark", "Very Fair"], "Under Tone": ["Cool", "Neutral", "Warm"]}, "featureNames": ["Hair Color_Black", "Hair Color_Blonde", "Hair Color_Brown", "Hair Color_Grey", "Hair Color_Red", "Eye Color_Black", "Eye Color_Blue", "Eye Color_Brown", "Eye Color_Green", "Eye Color_Grey", "Eye Color_Hazel", "Eye Color_Light Blue", "Eye Color_Light Brown", "Skin Tone_Brown", "Skin Tone_Fair", "Skin Tone_Medium", "Skin Tone_Olive", "Skin Tone_Very Dark", "Skin Tone_Very Fair", "Under Tone_Cool", "Under Tone_Neutral", "Under Tone_Warm"], "left": [1, 2, -1, -1, -1], "right": [4, 3, -1, -1, -1], "feature": [20, 19, -2, -2, -2], "threshold": [0.5, 0.5, -2.0, -2.0, -2.0], "leafClass": [0, 0, 0, 1, 2], "classes": ["Earth Tones, Olive, Coral, Peach, Mustard, Warm Red", "Jewel Tones, Icy Blue, Lavender, Silver, Emerald", "Soft Pinks, Plums, Teal, Neutral Beige"], "avoid": ["Cool Blue, Icy Gray, Jewel Tones", "Orange, Mustard, Brown", "Fluorescents, Harsh Yellow"]};
+
+// Inferencia del árbol de decisión exportado desde scikit-learn (One-Hot + DecisionTreeClassifier).
+function predictModel(M, inputs) {
+  // 1) One-Hot: una columna 0/1 por cada "Variable_Categoría", igual que en el notebook
+  const x = M.featureNames.map(n => {
+    const i = n.indexOf("_");                       // los nombres de variable no llevan "_"
+    return inputs[n.slice(0, i)] === n.slice(i + 1) ? 1 : 0;
+  });
+  // 2) Recorrer el árbol desde la raíz hasta una hoja
+  let node = 0; const path = [];
+  while (M.left[node] !== -1) {
+    const f = M.feature[node], goLeft = x[f] <= M.threshold[node];
+    path.push({ feature: M.featureNames[f], yes: goLeft });
+    node = goLeft ? M.left[node] : M.right[node];
+  }
+  const cls = M.leafClass[node];
+  return { cls, recommended: M.classes[cls], avoid: M.avoid[cls], path };
+}
+
+const PALETTE = {
+  Warm: {
+    rec: [["Earth Tones","#A0714F"],["Olive","#708238"],["Coral","#FF7F50"],["Peach","#FFCBA4"],["Mustard","#E1AD01"],["Warm Red","#C8382B"]],
+    avoid: [["Cool Blue","#3A78C2"],["Icy Gray","#C9D3DA"],["Jewel Tones",JEWEL]]
+  },
+  Cool: {
+    rec: [["Jewel Tones",JEWEL],["Icy Blue","#CFE8F5"],["Lavender","#B9A6DD"],["Silver","#C0C0C0"],["Emerald","#0B8F5E"]],
+    avoid: [["Orange","#F07F13"],["Mustard","#E1AD01"],["Brown","#7A4B2A"]]
+  },
+  Neutral: {
+    rec: [["Soft Pinks","#F2C1CF"],["Plums","#7B3F61"],["Teal","#1E8A8A"],["Neutral Beige","#D9C7AA"]],
+    avoid: [["Fluorescents",NEON],["Harsh Yellow","#FFE600"]]
+  }
+};
+
+// LAB-START
+const srgb2lin = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+function rgb2lab(rgb) {
+  const R = srgb2lin(rgb[0]), G = srgb2lin(rgb[1]), B = srgb2lin(rgb[2]);
+  const X = (0.4124564 * R + 0.3575761 * G + 0.1804375 * B) / 0.95047;
+  const Y = (0.2126729 * R + 0.7151522 * G + 0.0721750 * B);
+  const Z = (0.0193339 * R + 0.1191920 * G + 0.9503041 * B) / 1.08883;
+  const f = t => t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116;
+  const fx = f(X), fy = f(Y), fz = f(Z);
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+// LAB-END
+
+const $ = id => document.getElementById(id);
+const video = $("video"), overlay = $("overlay"), octx = overlay.getContext("2d");
+const work = document.createElement("canvas");
+const wctx = work.getContext("2d", { willReadFrequently: true });
+
+let landmarker = null, running = false, lastVideoTime = -1, missing = 0;
+let wb = null;
+let ema = null;
+let live = null, locked = null, shownName = null;
+let samples = [];
+let thr = { cool: 50, warm: 58 };
+
+try { samples = JSON.parse(localStorage.getItem("armonia_samples") || "[]"); } catch (e) { samples = []; }
+
+const median = a => { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const bgOf = c => Array.isArray(c) ? `linear-gradient(90deg,${c[0]} 33%,${c[1]} 33% 66%,${c[2]} 66%)` : c;
+const applyWb = rgb => wb ? rgb.map((v, i) => Math.min(255, v * wb[i])) : rgb;
+const setStatus = t => { $("status").textContent = t; };
+
+function samplePatch(cx, cy, r) {
+  const x0 = Math.max(0, Math.floor(cx - r)), y0 = Math.max(0, Math.floor(cy - r));
+  const x1 = Math.min(work.width, Math.ceil(cx + r)), y1 = Math.min(work.height, Math.ceil(cy + r));
+  const sw = x1 - x0, sh = y1 - y0;
+  if (sw < 2 || sh < 2) return null;
+  const d = wctx.getImageData(x0, y0, sw, sh).data;
+  const R = [], G = [], B = [];
+  for (let i = 0; i < d.length; i += 4) { R.push(d[i]); G.push(d[i + 1]); B.push(d[i + 2]); }
+  return [median(R), median(G), median(B)];
+}
+
+function classify(h) {
+  const labels = [...new Set(samples.map(s => s.label))];
+  if (labels.length >= 2) {
+    let best = null, bd = Infinity;
+    for (const l of labels) {
+      const hs = samples.filter(s => s.label === l).map(s => s.h);
+      const c = hs.reduce((a, b) => a + b, 0) / hs.length;
+      const d = Math.abs(h - c);
+      if (d < bd) { bd = d; best = l; }
+    }
+    return { name: best, method: `centroides de ${samples.length} muestras` };
+  }
+  const name = h < thr.cool ? "Cool" : h > thr.warm ? "Warm" : "Neutral";
+  return { name, method: "umbrales" };
+}
+
+function currentChoice() {
+  const o = $("override").value;
+  if (o !== "auto") return { name: o, src: "corrección manual" };
+  if (locked) return { name: locked, src: "resultado fijado" };
+  if (live) return { name: live.name, src: `cámara (${live.method})` };
+  return null;
+}
+
+// Color de cada nombre de la paleta (solo para dibujar; la decisión la toma el modelo)
+const COLOR = {};
+for (const p of Object.values(PALETTE)) for (const [n, c] of [...p.rec, ...p.avoid]) COLOR[n] = c;
+let shownKey = null;
+
+function inputsNow(name) {
+  const o = { "Under Tone": name };
+  for (const k of ARMONIA.inputs) if (k !== "Under Tone") o[k] = $("in_" + k.replace(/ /g, "_")).value;
+  return o;
+}
+
+function renderPalette(name) {
+  if (!name) {
+    $("palette").textContent = "Se mostrará cuando haya un undertone.";
+    $("modelInfo").textContent = ""; shownKey = null; return;
+  }
+  const inp = inputsNow(name), key = JSON.stringify(inp);
+  if (key === shownKey) return;                       // nada cambió: no se vuelve a predecir
+  shownKey = key;
+  const r = predictModel(ARMONIA, inp);                 // <-- aquí corre el modelo entrenado
+  const toArr = s => s.split(",").map(t => t.trim()).map(n => [n, COLOR[n] || "#cccccc"]);
+  const row = (cls, label, arr) => `<div class="pal-row"><div class="pal-lab ${cls}">${label}</div><div class="sw">` +
+    arr.map(([n, c]) => `<div class="c"><i style="background:${bgOf(c)}"></i>${n}</div>`).join("") + `</div></div>`;
+  $("palette").innerHTML = row("ok", "Recomendar", toArr(r.recommended)) + row("bad", "Evitar", toArr(r.avoid));
+  const camino = r.path.map(s => {
+    const i = s.feature.indexOf("_");
+    return `¿${s.feature.slice(0, i)} = ${s.feature.slice(i + 1)}? ${s.yes ? "No" : "Sí"}`;
+  }).join(" → ");
+  $("modelInfo").innerHTML = `<b>Camino que siguió el árbol:</b> ${camino} → clase ${r.cls + 1} de ${ARMONIA.classes.length}.<br>` +
+    `El modelo tiene ${ARMONIA.left.length} nodos y solo pregunta por el subtono; pelo, ojos y piel no cambian la predicción. ` +
+    `"Evitar" es la lista que el dataset asocia a la paleta predicha.`;
+}
+
+function refreshResult() {
+  const ch = currentChoice();
+  $("result").textContent = ch ? ch.name : "–";
+  $("resultSrc").textContent = ch ? `Fuente: ${ch.src}` : "Esperando cámara";
+  const name = ch ? ch.name : null;
+  renderPalette(name);
+  $("btnLock").textContent = locked ? "Liberar resultado" : "Fijar resultado";
+}
+
+function updateSampleInfo() {
+  const c = l => samples.filter(s => s.label === l).length;
+  $("sampleInfo").textContent = `Muestras guardadas: ${samples.length} (Warm ${c("Warm")}, Cool ${c("Cool")}, Neutral ${c("Neutral")})`;
+}
+
+function processFrame() {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w) return;
+  if (work.width !== w) { work.width = w; work.height = h; overlay.width = w; overlay.height = h; }
+  wctx.drawImage(video, 0, 0, w, h);
+  octx.clearRect(0, 0, w, h);
+  const res = landmarker.detectForVideo(video, performance.now());
+  const lm = res.faceLandmarks && res.faceLandmarks[0];
+  if (!lm) {
+    missing++;
+    if (missing > 10) { $("faceStatus").textContent = "No veo ningún rostro"; live = null; refreshResult(); }
+    return;
+  }
+  missing = 0;
+  const px = i => [lm[i].x * w, lm[i].y * h];
+  const a = px(234), b = px(454);
+  const faceW = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const r = Math.max(3, faceW * 0.03);
+  const valid = [];
+  for (const i of PATCH_IDS) {
+    const [x, y] = px(i);
+    const rgb = samplePatch(x, y, r);
+    let ok = false;
+    if (rgb) {
+      const c = applyWb(rgb), lab = rgb2lab(c);
+      ok = lab[0] > 25 && lab[0] < 92;
+      if (ok) valid.push({ rgb: c, lab });
+    }
+    octx.beginPath(); octx.arc(x, y, r, 0, Math.PI * 2);
+    octx.lineWidth = 2; octx.strokeStyle = ok ? "#39d98a" : "#ff5a5a"; octx.stroke();
+  }
+  if (valid.length < 2) { $("faceStatus").textContent = "Poca zona de piel útil (revisa la luz)"; return; }
+  const fl = [0, 1, 2].map(k => median(valid.map(v => v.lab[k])));
+  const fr = [0, 1, 2].map(k => median(valid.map(v => v.rgb[k])));
+  ema = ema ? { lab: ema.lab.map((v, k) => v * 0.9 + fl[k] * 0.1), rgb: ema.rgb.map((v, k) => v * 0.9 + fr[k] * 0.1) } : { lab: fl, rgb: fr };
+  const [L, A, B] = ema.lab;
+  const hue = (Math.atan2(B, A) * 180 / Math.PI + 360) % 360;
+  $("mL").textContent = L.toFixed(1);
+  $("mA").textContent = A.toFixed(1);
+  $("mB").textContent = B.toFixed(1);
+  $("mH").textContent = hue.toFixed(1);
+  $("skinChip").style.background = `rgb(${ema.rgb.map(v => Math.round(v)).join(",")})`;
+  $("faceStatus").textContent = `Rostro detectado (${valid.length} de ${PATCH_IDS.length} zonas válidas${wb ? ", blanco calibrado" : ""})`;
+  live = classify(hue);
+  refreshResult();
+}
+
+function loop() {
+  if (!running) return;
+  if (video.currentTime !== lastVideoTime) { lastVideoTime = video.currentTime; processFrame(); }
+  requestAnimationFrame(loop);
+}
+
+async function createLandmarker(fileset, delegate) {
+  return FaceLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: MODEL, delegate },
+    runningMode: "VIDEO",
+    numFaces: 1
+  });
+}
+
+$("btnStart").onclick = async () => {
+  if (running) return;
+  try {
+    setStatus("Cargando el modelo de MediaPipe…");
+    const fileset = await FilesetResolver.forVisionTasks(WASM);
+    try { landmarker = await createLandmarker(fileset, "GPU"); }
+    catch (e) { landmarker = await createLandmarker(fileset, "CPU"); }
+    setStatus("Solicitando la cámara…");
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: "user" }, audio: false });
+    video.srcObject = stream;
+    await video.play();
+    running = true;
+    setStatus("Cámara activa. Mira de frente, con luz pareja sobre el rostro.");
+    loop();
+  } catch (e) {
+    setStatus("No se pudo iniciar: " + (e && e.message ? e.message : e));
+  }
+};
+
+$("stage").addEventListener("click", ev => {
+  if (!running) return;
+  const rect = $("stage").getBoundingClientRect();
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const scale = Math.max(rect.width / vw, rect.height / vh);
+  const dispW = vw * scale, dispH = vh * scale;
+  const offX = (dispW - rect.width) / 2, offY = (dispH - rect.height) / 2;
+  const sx = rect.width - (ev.clientX - rect.left);
+  const sy = ev.clientY - rect.top;
+  const x = (sx + offX) / scale, y = (sy + offY) / scale;
+  const ref = samplePatch(x, y, 8);
+  if (!ref) return;
+  const m = (ref[0] + ref[1] + ref[2]) / 3;
+  wb = ref.map(v => m / Math.max(v, 1));
+  ema = null;
+  setStatus("Blanco calibrado con la zona que tocaste.");
+});
+
+$("btnWbReset").onclick = () => { wb = null; ema = null; setStatus("Calibración de blanco eliminada."); };
+
+$("btnLock").onclick = () => {
+  if (locked) { locked = null; }
+  else if (live) { locked = live.name; }
+  refreshResult();
+};
+$("override").onchange = refreshResult;
+
+$("slCool").oninput = e => {
+  thr.cool = +e.target.value;
+  if (thr.cool > thr.warm) { thr.warm = thr.cool; $("slWarm").value = thr.warm; $("vWarm").textContent = thr.warm; }
+  $("vCool").textContent = thr.cool;
+};
+$("slWarm").oninput = e => {
+  thr.warm = +e.target.value;
+  if (thr.warm < thr.cool) { thr.cool = thr.warm; $("slCool").value = thr.cool; $("vCool").textContent = thr.cool; }
+  $("vWarm").textContent = thr.warm;
+};
+
+$("btnSave").onclick = () => {
+  if (!ema) { setStatus("Aún no hay una medición para guardar."); return; }
+  const [L, A, B] = ema.lab;
+  samples.push({ label: $("labelSel").value, h: (Math.atan2(B, A) * 180 / Math.PI + 360) % 360, L, a: A, b: B });
+  try { localStorage.setItem("armonia_samples", JSON.stringify(samples)); } catch (e) {}
+  updateSampleInfo();
+};
+$("btnClear").onclick = () => {
+  samples = [];
+  try { localStorage.removeItem("armonia_samples"); } catch (e) {}
+  updateSampleInfo();
+};
+
+(function buildInputs() {
+  const box = $("modelInputs");
+  for (const k of ARMONIA.inputs) {
+    if (k === "Under Tone") continue;
+    const id = "in_" + k.replace(/ /g, "_");
+    const opts = ARMONIA.categories[k].map(v => `<option>${v}</option>`).join("");
+    box.insertAdjacentHTML("beforeend", `<label class="sl"><span style="width:130px">${k}</span><select id="${id}" style="flex:1">${opts}</select></label>`);
+    $(id).onchange = refreshResult;
+  }
+})();
+updateSampleInfo();
+</script>
+</body>
+</html>
